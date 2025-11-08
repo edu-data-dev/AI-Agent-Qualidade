@@ -36,7 +36,29 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: 🔍 Detectar arquivos alterados
+      - name: 🔍 Verificar se é primeira execução
+        id: check-db
+        run: |
+          if [ ! -d "chroma_db" ] || [ -z "$(ls -A chroma_db 2>/dev/null)" ]; then
+            echo "is_first_run=true" >> $GITHUB_OUTPUT
+            echo "🆕 Primeira execução detectada - será feito BOOTSTRAP completo"
+          else
+            echo "is_first_run=false" >> $GITHUB_OUTPUT
+            echo "♻️  Banco existente detectado - será feita ingestão DELTA"
+          fi
+      
+      - name: 🚀 Bootstrap inicial (primeira execução)
+        if: steps.check-db.outputs.is_first_run == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "🎯 EXECUTANDO BOOTSTRAP - Processando TODO o projeto..."
+          echo "📂 Isso pode levar alguns minutos dependendo do tamanho do projeto"
+          python bootstrap_project.py --project-path . --include-config
+          echo "✅ Bootstrap concluído!"
+      
+      - name: 🔍 Detectar arquivos alterados (execuções subsequentes)
+        if: steps.check-db.outputs.is_first_run == 'false'
         id: changed-files
         run: |
           echo "Detectando arquivos alterados..."
@@ -54,17 +76,17 @@ jobs:
             echo "$CHANGED_FILES"
           fi
       
-      - name: 🧠 Executar ingestão (Delta)
-        if: steps.changed-files.outputs.has_changes == 'true'
+      - name: 🧠 Executar ingestão delta (execuções subsequentes)
+        if: steps.check-db.outputs.is_first_run == 'false' && steps.changed-files.outputs.has_changes == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🚀 Iniciando ingestão delta..."
-          python src/main.py --skip-ingestion || python src/main.py
-          echo "✅ Ingestão concluída!"
+          echo "🚀 Iniciando ingestão delta (apenas arquivos alterados)..."
+          python src/main.py --delta
+          echo "✅ Ingestão delta concluída!"
       
       - name: 📊 Validar banco de dados
-        if: steps.changed-files.outputs.has_changes == 'true'
+        if: steps.check-db.outputs.is_first_run == 'true' || steps.changed-files.outputs.has_changes == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
@@ -72,7 +94,7 @@ jobs:
           python validate_ingestion.py || echo "⚠️ Validação falhou, mas continuando..."
       
       - name: 💾 Fazer upload do ChromaDB atualizado
-        if: steps.changed-files.outputs.has_changes == 'true'
+        if: steps.check-db.outputs.is_first_run == 'true' || steps.changed-files.outputs.has_changes == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: chroma-db-${{ github.sha }}
@@ -80,25 +102,53 @@ jobs:
           retention-days: 30
       
       - name: 📝 Comentar no PR (se aplicável)
-        if: github.event_name == 'pull_request' && steps.changed-files.outputs.has_changes == 'true'
+        if: github.event_name == 'pull_request' && (steps.check-db.outputs.is_first_run == 'true' || steps.changed-files.outputs.has_changes == 'true')
         uses: actions/github-script@v7
         with:
           script: |
-            const changedFiles = `${{ steps.changed-files.outputs.changed_files }}`.split('\n').filter(f => f);
-            const comment = `## 🧠 Cérebro de QA - Atualização de Conhecimento
+            const isFirstRun = '${{ steps.check-db.outputs.is_first_run }}' === 'true';
             
-            ### ✅ Base de conhecimento atualizada com sucesso!
+            let comment = '';
             
-            **Arquivos processados:**
-            ${changedFiles.map(f => `- \`${f}\``).join('\n')}
-            
-            **Próximos passos:**
-            - O banco de dados vetorial foi atualizado
-            - Novas regras de negócio foram indexadas
-            - O agente está pronto para gerar testes com o novo conhecimento
-            
-            **Artefato gerado:** \`chroma-db-${{ github.sha }}\`
-            `;
+            if (isFirstRun) {
+              comment = `## 🧠 Cérebro de QA - Bootstrap Inicial
+              
+              ### 🎉 Base de conhecimento criada pela primeira vez!
+              
+              **Tipo de ingestão:** BOOTSTRAP COMPLETO
+              
+              **O que foi processado:**
+              - Todo o código-fonte do projeto (.py, .java, .js, etc.)
+              - Toda a documentação (.md, .txt, etc.)
+              - Arquivos de configuração (.json, .yaml, etc.)
+              
+              **Próximos passos:**
+              - ✅ Banco de dados vetorial criado do zero
+              - ✅ Todas as regras de negócio foram indexadas
+              - ✅ O agente está pronto para gerar testes
+              - 🔄 Próximas atualizações serão INCREMENTAIS (apenas mudanças)
+              
+              **Artefato gerado:** \`chroma-db-${{ github.sha }}\`
+              `;
+            } else {
+              const changedFiles = `${{ steps.changed-files.outputs.changed_files }}`.split('\n').filter(f => f);
+              comment = `## 🧠 Cérebro de QA - Atualização Incremental
+              
+              ### ✅ Base de conhecimento atualizada com sucesso!
+              
+              **Tipo de ingestão:** DELTA (apenas mudanças)
+              
+              **Arquivos processados:**
+              ${changedFiles.map(f => `- \`${f}\``).join('\n')}
+              
+              **Próximos passos:**
+              - O banco de dados vetorial foi atualizado
+              - Novas regras de negócio foram indexadas
+              - O agente está pronto para gerar testes com o novo conhecimento
+              
+              **Artefato gerado:** \`chroma-db-${{ github.sha }}\`
+              `;
+            }
             
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -108,7 +158,7 @@ jobs:
             });
       
       - name: 📊 Gerar relatório de mudanças
-        if: steps.changed-files.outputs.has_changes == 'true'
+        if: steps.check-db.outputs.is_first_run == 'true' || steps.changed-files.outputs.has_changes == 'true'
         run: |
           echo "# 📊 Relatório de Atualização - Cérebro de QA" > report.md
           echo "" >> report.md
@@ -116,10 +166,21 @@ jobs:
           echo "**Commit:** ${{ github.sha }}" >> report.md
           echo "**Branch:** ${{ github.ref_name }}" >> report.md
           echo "" >> report.md
-          echo "## Arquivos Alterados" >> report.md
-          echo "${{ steps.changed-files.outputs.changed_files }}" | while read file; do
-            [ -n "$file" ] && echo "- $file" >> report.md
-          done
+          
+          if [ "${{ steps.check-db.outputs.is_first_run }}" == "true" ]; then
+            echo "**Tipo:** BOOTSTRAP INICIAL (primeira execução)" >> report.md
+            echo "" >> report.md
+            echo "## Processamento Completo" >> report.md
+            echo "Todo o projeto foi analisado e indexado pela primeira vez." >> report.md
+          else
+            echo "**Tipo:** INGESTÃO DELTA (incremental)" >> report.md
+            echo "" >> report.md
+            echo "## Arquivos Alterados" >> report.md
+            echo "${{ steps.changed-files.outputs.changed_files }}" | while read file; do
+              [ -n "$file" ] && echo "- $file" >> report.md
+            done
+          fi
+          
           echo "" >> report.md
           echo "## Estatísticas do Banco" >> report.md
           echo "_(Executar validate_ingestion.py para detalhes)_" >> report.md
@@ -127,7 +188,7 @@ jobs:
           cat report.md
       
       - name: 📤 Upload do relatório
-        if: steps.changed-files.outputs.has_changes == 'true'
+        if: steps.check-db.outputs.is_first_run == 'true' || steps.changed-files.outputs.has_changes == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ingestion-report-${{ github.sha }}

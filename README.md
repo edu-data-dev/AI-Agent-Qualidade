@@ -254,22 +254,75 @@ python view_database.py
 6. Estatísticas do banco
 7. Exportar para CSV
 
-## � CI/CD - Aprendizado Contínuo
+## 🎯 Bootstrap - Primeira Ingestão
+
+**IMPORTANTE:** Quando usar o Cérebro de QA pela **primeira vez** em um projeto, você precisa fazer o **BOOTSTRAP** (ingestão inicial completa).
+
+### 🆕 Primeira Vez no Projeto
+
+Execute o bootstrap para processar **TODO** o código-fonte e documentação:
+
+```bash
+# Bootstrap do projeto atual
+python bootstrap_project.py --project-path .
+
+# Bootstrap de outro projeto
+python bootstrap_project.py --project-path /caminho/do/projeto
+
+# Incluir arquivos de configuração (JSON, YAML, etc.)
+python bootstrap_project.py --project-path . --include-config
+```
+
+**O que o bootstrap faz:**
+- ✅ Escaneia recursivamente todo o projeto
+- ✅ Processa arquivos `.py`, `.java`, `.js`, `.md`, etc.
+- ✅ Traduz código em regras de negócio via GPT-4o-mini
+- ✅ Cria embeddings de tudo
+- ✅ Gera ChromaDB completo do zero
+
+**Tempo estimado:** 5-30 minutos (dependendo do tamanho do projeto)
+
+### 🔄 Bootstrap vs Delta
+
+| Aspecto | Bootstrap | Delta |
+|:--------|:----------|:------|
+| **Quando** | Primeira vez | Commits subsequentes |
+| **Processa** | TODO o projeto | Apenas mudanças |
+| **Tempo** | Minutos | Segundos |
+| **Uso** | Manual (inicial) | Automático (CI/CD) |
+
+👉 **[Guia Completo: Bootstrap vs Delta](docs/BOOTSTRAP_VS_DELTA.md)**
+
+## 🚀 CI/CD - Aprendizado Contínuo
 
 O sistema possui **integração completa com GitHub Actions** para aprendizado automático a cada commit!
 
 ### ⚡ Como Funciona
 
+**Primeira execução (Bootstrap Automático):**
+```
+Primeiro push para o GitHub
+           ↓
+GitHub Actions detecta: ChromaDB não existe
+           ↓
+🎯 Executa BOOTSTRAP (processa TODO o projeto)
+           ↓
+Cria ChromaDB completo
+           ↓
+✅ Base de conhecimento inicial criada!
+```
+
+**Execuções subsequentes (Delta Automático):**
 ```
 Desenvolvedor modifica código/docs
            ↓
     git push origin main
            ↓
-GitHub Actions detecta alterações (git diff)
+GitHub Actions detecta: ChromaDB já existe
            ↓
-Processa APENAS arquivos modificados (Delta)
+🔄 Executa DELTA (processa apenas mudanças)
            ↓
-Atualiza ChromaDB automaticamente
+Atualiza ChromaDB incrementalmente
            ↓
 ✅ Cérebro de QA mais inteligente!
 ```
