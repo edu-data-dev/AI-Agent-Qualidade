@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 from core.ingestion import create_vector_store
+from core.delta_ingestion import process_changed_files, get_changed_files_from_git
 from core.rag_pipeline import setup_rag_chain, generate_test_plan
 from dotenv import load_dotenv
 
@@ -143,6 +144,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Cérebro de QA - Sistema RAG para Geração de Testes')
     parser.add_argument('--skip-ingestion', action='store_true', 
                         help='Pula a etapa de ingestão (usa DB existente)')
+    parser.add_argument('--delta', action='store_true',
+                        help='Modo delta: processa apenas arquivos alterados (git diff)')
+    parser.add_argument('--files', nargs='+',
+                        help='Lista de arquivos específicos para ingestão delta')
     parser.add_argument('--multi-scenario', action='store_true',
                         help='Executa múltiplos cenários de teste')
     parser.add_argument('--query', type=str,
@@ -152,9 +157,29 @@ if __name__ == "__main__":
     
     # 1. Executa a Ingestão (se não for pulada)
     if not args.skip_ingestion:
-        if not run_ingestion():
-            print("\n❌ Falha na ingestão. Encerrando.")
-            sys.exit(1)
+        if args.delta:
+            # Modo delta: processa apenas alterações
+            print("\n🔄 MODO DELTA: Processando apenas arquivos alterados")
+            
+            if args.files:
+                # Arquivos especificados manualmente
+                changed_files = args.files
+                print(f"📁 Arquivos especificados: {len(changed_files)}")
+            else:
+                # Detecta via git diff
+                changed_files = get_changed_files_from_git()
+            
+            if changed_files:
+                stats = process_changed_files(changed_files)
+                if stats['errors'] > 0:
+                    print("\n⚠️  Ingestão delta concluída com erros.")
+            else:
+                print("\n⚠️  Nenhum arquivo alterado detectado.")
+        else:
+            # Modo completo: reingestão total
+            if not run_ingestion():
+                print("\n❌ Falha na ingestão. Encerrando.")
+                sys.exit(1)
     else:
         print("\n⏭️  Pulando ingestão (usando DB existente)")
     

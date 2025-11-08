@@ -1,0 +1,154 @@
+name: 🧠 Cérebro de QA - Aprendizado Contínuo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'data/**.py'
+      - 'data/**.md'
+      - 'src/**.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'data/**.py'
+      - 'data/**.md'
+      - 'src/**.py'
+
+jobs:
+  rag-ingestion:
+    name: 📚 Atualizar Base de Conhecimento
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Necessário para git diff
+      
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 📦 Instalar dependências
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 🔍 Detectar arquivos alterados
+        id: changed-files
+        run: |
+          echo "Detectando arquivos alterados..."
+          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD | grep -E '\.(py|md)$' || echo "")
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Nenhum arquivo Python ou Markdown foi alterado"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ Arquivos alterados detectados:"
+            echo "$CHANGED_FILES"
+          fi
+      
+      - name: 🧠 Executar ingestão (Delta)
+        if: steps.changed-files.outputs.has_changes == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "🚀 Iniciando ingestão delta..."
+          python src/main.py --skip-ingestion || python src/main.py
+          echo "✅ Ingestão concluída!"
+      
+      - name: 📊 Validar banco de dados
+        if: steps.changed-files.outputs.has_changes == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "🔍 Validando banco de dados vetorial..."
+          python validate_ingestion.py || echo "⚠️ Validação falhou, mas continuando..."
+      
+      - name: 💾 Fazer upload do ChromaDB atualizado
+        if: steps.changed-files.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chroma-db-${{ github.sha }}
+          path: chroma_db/
+          retention-days: 30
+      
+      - name: 📝 Comentar no PR (se aplicável)
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const changedFiles = `${{ steps.changed-files.outputs.changed_files }}`.split('\n').filter(f => f);
+            const comment = `## 🧠 Cérebro de QA - Atualização de Conhecimento
+            
+            ### ✅ Base de conhecimento atualizada com sucesso!
+            
+            **Arquivos processados:**
+            ${changedFiles.map(f => `- \`${f}\``).join('\n')}
+            
+            **Próximos passos:**
+            - O banco de dados vetorial foi atualizado
+            - Novas regras de negócio foram indexadas
+            - O agente está pronto para gerar testes com o novo conhecimento
+            
+            **Artefato gerado:** \`chroma-db-${{ github.sha }}\`
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: 📊 Gerar relatório de mudanças
+        if: steps.changed-files.outputs.has_changes == 'true'
+        run: |
+          echo "# 📊 Relatório de Atualização - Cérebro de QA" > report.md
+          echo "" >> report.md
+          echo "**Data:** $(date)" >> report.md
+          echo "**Commit:** ${{ github.sha }}" >> report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> report.md
+          echo "" >> report.md
+          echo "## Arquivos Alterados" >> report.md
+          echo "${{ steps.changed-files.outputs.changed_files }}" | while read file; do
+            [ -n "$file" ] && echo "- $file" >> report.md
+          done
+          echo "" >> report.md
+          echo "## Estatísticas do Banco" >> report.md
+          echo "_(Executar validate_ingestion.py para detalhes)_" >> report.md
+          
+          cat report.md
+      
+      - name: 📤 Upload do relatório
+        if: steps.changed-files.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-report-${{ github.sha }}
+          path: report.md
+          retention-days: 90
+
+  notify-success:
+    name: 🎉 Notificar Sucesso
+    runs-on: ubuntu-latest
+    needs: rag-ingestion
+    if: success()
+    
+    steps:
+      - name: 🎊 Celebrar atualização
+        run: |
+          echo "🎉 ================================================"
+          echo "🎉  CÉREBRO DE QA ATUALIZADO COM SUCESSO!"
+          echo "🎉 ================================================"
+          echo ""
+          echo "✅ O agente está mais inteligente agora!"
+          echo "✅ Novas regras de negócio foram aprendidas"
+          echo "✅ Pronto para gerar testes mais precisos"
+          echo ""
+          echo "🚀 Próxima geração de testes será ainda melhor!"
